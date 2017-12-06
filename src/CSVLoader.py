@@ -3,6 +3,7 @@
 import csv
 #print(csv.__file__)
 import sys
+import math
 reload(sys)
 
 import time
@@ -23,6 +24,42 @@ from PyQt4.QtGui import *
 import csv
 
 import operator
+
+from PyQt4.QtCore import QSize
+from PyQt4.QtGui import QApplication, QLabel, QMovie, QPainter, QFontMetrics
+
+####################### Play Movie(gif) ################################
+class QTextMovieLabel(QLabel):
+    def __init__(self, text, fileName):
+        QLabel.__init__(self)
+        self._text = text
+        m = QMovie(fileName)
+        m.start()
+        self.setMovie(m)
+
+    def setMovie(self, movie):
+        QLabel.setMovie(self, movie)
+        s=movie.currentImage().size()
+        self._movieWidth = s.width()
+        self._movieHeight = s.height()
+
+    def paintEvent(self, evt):
+        QLabel.paintEvent(self, evt)
+        p = QPainter(self)
+        p.setFont(self.font())
+        x = self._movieWidth + 6
+        y = (self.height() + p.fontMetrics().xHeight()) / 2
+        p.drawText(x, y, self._text)
+        p.end()
+
+    def sizeHint(self):
+        fm = QFontMetrics(self.font())
+        return QSize(self._movieWidth + 6 + fm.width(self._text),
+                self._movieHeight)
+
+    def setText(self, text):
+        self._text = text
+
 
 #################### csv sorting function starts here ##################
 
@@ -76,12 +113,18 @@ class WriteSDWindow(QtGui.QDialog):
         self.textBrowser.append("This is a QTextBrowser!")
 
         self.verticalLayout = QtGui.QVBoxLayout(self)
+        # Animation start here.
+        self.l = QTextMovieLabel('Loading...', '/home/dash/Downloads/iDev_planned_release_vs_critical_bug_Clue.gif')
+        self.verticalLayout.addWidget(self.l)
+        self.l.hide()
+        # Animation stops here.
         self.verticalLayout.addWidget(self.textBrowser)
         self.verticalLayout.addWidget(self.buttonBox)
 
         # Connect the signal/slot of button clicking
         self.buttonBox.accepted.connect(self.accept)
         self.buttonBox.rejected.connect(self.reject)
+
 
     # buttonbox for button clicked
     @QtCore.pyqtSlot()
@@ -91,8 +134,12 @@ class WriteSDWindow(QtGui.QDialog):
         # Display the image, then automatically exit
         # Copy the generated files into the SD Card
         copyfile('python.jpg', '/tmp/python.jpg')
-        time.sleep(3)
-        self.close()
+        self.l.show()
+        # todo: do something here
+        #time.sleep(3)
+        #self.close()
+        # todo: after things done, hide the animation
+        # todo: self.close() and return to main window.
 
 #################### Main Window ##################
 class MyWindow(QtGui.QWidget):
