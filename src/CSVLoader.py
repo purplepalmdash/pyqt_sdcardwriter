@@ -1,32 +1,29 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
 import csv
-#print(csv.__file__)
+from multiprocessing import Process
 import sys
-import math
+import threading
+from threading import Thread
 reload(sys)
-
+sys.setdefaultencoding('utf8')
 import time
 # copy files to someplace
 from shutil import copyfile
-
-sys.setdefaultencoding('utf8')
-
 import sip
 sip.setapi('QString', 2)
 sip.setapi('QVariant', 2)
-
 from PyQt4 import QtGui, QtCore
 from PyQt4.QtCore import *
 from PyQt4.QtGui import *
-
-
 import csv
-
 import operator
-
 from PyQt4.QtCore import QSize
 from PyQt4.QtGui import QApplication, QLabel, QMovie, QPainter, QFontMetrics
+from glob import glob
+from subprocess import check_output, CalledProcessError
+import os
+from distutils.dir_util import copy_tree
 
 ####################### Play Movie(gif) ################################
 class QTextMovieLabel(QLabel):
@@ -60,9 +57,7 @@ class QTextMovieLabel(QLabel):
     def setText(self, text):
         self._text = text
 
-
 #################### csv sorting function starts here ##################
-
 def sort_by_column(csv_cont, col, reverse=False):
     header = csv_cont[0]
     body = csv_cont[1:]
@@ -76,7 +71,6 @@ def sort_by_column(csv_cont, col, reverse=False):
     body.insert(0, header)
     return body
 
-
 def csv_to_list(csv_file, delimiter=','):
     with open(csv_file, 'r') as csv_con:
         reader = csv.reader(csv_con, delimiter=delimiter)
@@ -89,7 +83,6 @@ def print_csv(csv_content):
         print('\t'.join(row))
     print(50*'-')
 
-
 def write_csv(dest, csv_cont):
     """ New CSV file. """
     with open(dest, 'w') as out_file:
@@ -97,7 +90,20 @@ def write_csv(dest, csv_cont):
         for row in csv_cont:
             writer.writerow(row)
 
-#################### csv sorting function stops here ##################
+#################### Get all mounted USB(Linux)###################
+def get_usb_devices():
+    sdb_devices = map(os.path.realpath, glob('/sys/block/sd*'))
+    # Bug-fix: in ArchLinux, some usb item in 5, some items in 6
+    usb_devices = (dev for dev in sdb_devices
+        if 'usb' in dev.split('/')[6] or 'usb' in dev.split('/')[5])
+    return dict((os.path.basename(dev), dev) for dev in usb_devices)
+
+def get_mount_points(devices=None):
+    devices = devices or get_usb_devices() # if devices are None: get_usb_devices
+    output = check_output(['mount']).splitlines()
+    is_usb = lambda path: any(dev in path for dev in devices)
+    usb_info = (line for line in output if is_usb(line.split()[0]))
+    return [(info.split()[0], info.split()[2]) for info in usb_info]
 
 #################### Write SD Window ##################
 class WriteSDWindow(QtGui.QDialog):
@@ -108,38 +114,51 @@ class WriteSDWindow(QtGui.QDialog):
         self.buttonBox = QtGui.QDialogButtonBox(self)
         self.buttonBox.setOrientation(QtCore.Qt.Horizontal)
         self.buttonBox.setStandardButtons(QtGui.QDialogButtonBox.Cancel|QtGui.QDialogButtonBox.Ok)
+        self.listWidget = QListWidget()
 
-        self.textBrowser = QtGui.QTextBrowser(self)
-        self.textBrowser.append("This is a QTextBrowser!")
+        # Fill in the items into the self.listWidget
+        for i in get_mount_points():
+            self.listWidget.addItem(i[1])
 
         self.verticalLayout = QtGui.QVBoxLayout(self)
-        # Animation start here.
-        self.l = QTextMovieLabel('Loading...', '/home/dash/Downloads/iDev_planned_release_vs_critical_bug_Clue.gif')
+        # Animation for waiting
+        self.l = QTextMovieLabel('OnGoing?', '/home/dash/Downloads/cheers.gif')
         self.verticalLayout.addWidget(self.l)
-        self.l.hide()
-        # Animation stops here.
-        self.verticalLayout.addWidget(self.textBrowser)
+        self.l.show()
+        self.verticalLayout.addWidget(self.listWidget)
         self.verticalLayout.addWidget(self.buttonBox)
 
         # Connect the signal/slot of button clicking
         self.buttonBox.accepted.connect(self.accept)
         self.buttonBox.rejected.connect(self.reject)
 
-
     # buttonbox for button clicked
     @QtCore.pyqtSlot()
     def accept(self):
-        print "a you clicked accept"
-        # todo: demo for sleep 3 seconds and exit
-        # Display the image, then automatically exit
-        # Copy the generated files into the SD Card
-        copyfile('python.jpg', '/tmp/python.jpg')
-        self.l.show()
-        # todo: do something here
-        #time.sleep(3)
-        #self.close()
-        # todo: after things done, hide the animation
-        # todo: self.close() and return to main window.
+        # Detect if you have selected some item from listWidget
+        item = self.listWidget.currentItem()
+        #value = item.text()
+        if item == None:
+            QMessageBox.about(self, "Select One Disk", "Select Your Disk!!!")
+        else:
+            # Display the image, then automatically exit
+            # Copy the generated files into the SD Card
+            # Destination directory
+            dest = item.text() #+'/localboot1'
+            # show successful movie
+            copy_tree("./localboot",dest)
+            copyfile('./config/config.wtc',dest+'/configs/config.wtc')
+            copyfile('./config/initrd.wtc',dest+'/configs/initrd.wtc')
+            # After copy, sync to disk
+            if hasattr(os, 'sync'):
+                sync = os.sync
+            else:
+                import ctypes
+                libc = ctypes.CDLL("libc.so.6")
+                def sync():
+                    libc.sync()
+            QMessageBox.about(self, "Write Finish", "Your Disk have been wrote!!!")
+            self.close()
 
 #################### Main Window ##################
 class MyWindow(QtGui.QWidget):
@@ -179,7 +198,6 @@ class MyWindow(QtGui.QWidget):
     def loadCsv(self, fileName):
         # Always sorted via username
         csv_cont = csv_to_list(fileName)
-        #print_csv(csv_cont)
         # Sort via Name
         csv_sorted = sort_by_column(csv_cont, 'Name')
         for row in csv_sorted:
@@ -194,21 +212,6 @@ class MyWindow(QtGui.QWidget):
                 pass
         for i in range(3):
             self.model.appendRow('')
-
-
-        #with open(fileName, "rb") as fileInput:
-        #    for row in csv.reader(fileInput):
-        #        # Only display the non-blank line
-        #        if row[0] and row[0].strip():
-        #            items = [
-        #                QtGui.QStandardItem(field)
-        #                for field in row
-        #            ]
-        #            self.model.appendRow(items)
-        #        else:
-        #            pass
-        #for i in range(3):
-        #    self.model.appendRow('')
 
     def writeCsv(self, fileName):
         with open(fileName, "wb") as fileOutput:
@@ -235,77 +238,42 @@ class MyWindow(QtGui.QWidget):
 
     @QtCore.pyqtSlot()
     def on_pushButtonWriteSD_clicked(self):
-        # get row index
-        #rows=[idx.row() for idx in self.tableView.selectionModel().selectedRows()]
-        #print type(rows)
-        #for i in rows:
-        #    print i
-        # Another method
-        #indexes = self.tableView.selectionModel().selectedRows()
-        #print type(indexes)
-        #for index in sorted(indexes):
-        #    print('Row %d is selected' % index.row())
-        # Get selected row content, notice if you selecte multiple lines, we only use the first one for writing
         howmany = 0
-        print "kkkkkkkkkkkkkkkkkkkk"
-        print(len(self.tableView.selectedIndexes()))
-        print "kkkkkkkkkkkkkkkkkkkk"
+        filecontent = []
         for i in range(len(self.tableView.selectedIndexes())):
             howmany+=1
             index = self.tableView.selectedIndexes()[i]
             row_content = str(self.tableView.model().data(index))
-            print row_content
-        print "*************"
-        print howmany
-        print "*************"
+            filecontent.append(row_content)
         ### todo: multiple lines could be selected, while we only want to use the first line.
-        #lenth = len(self.tableView.selectedIndexes())
-        #for i in self.tableView.selectedIndexes():
-        #    print str(i)
-        #print lenth
-        #index = self.tableView.selectedIndexes()[0]
-        #row_content = str(self.tableView.model().data(index))
-        #print (row_content)
-        #user_elements=row_content.split()
-        #print(type(user_elements))
-        #for i in user_elements:
-        #    print i+"**"
-        #print "**************************"
         # Data Processing Routing goes from here.
         ### todo: judget the content
-        # Write SD comes from here
-        # PoP up the write content window
-        self.dialog.show()
+        print len(filecontent)
+        if len(filecontent) == 0:
+            QMessageBox.about(self, "At Least One Item", "At Least One Item!!!")
+        else:
+            ### todo: the local configuration file should be written starts from here.
+            print filecontent
 
-###################### Play a gif function ###########################
-class ImagePlayer(QWidget):
-    def __init__(self, filename, title, parent=None):
-        QWidget.__init__(self, parent)
+            #### Manually write our own configuration files, these files will be later copy into sd card
+            # Write configuration file 1
+            file = open("config/initrd.wtc","w")
+            file.write("clientIP=%s\n" % filecontent[1])
+            file.write("netmask=%s\n" % filecontent[2])
+            file.write("routerIP=%s\n" % filecontent[3])
+            file.write("nameserverIP=%s\n" % filecontent[4])
+            file.write("config=local\nsetupPassword=783cc2d526d862eb68d68baa854985f4\r\nnetmedia=ethernet\r\n")
+            file.close()
+            # Write configuration file 1
+            file = open("config/config.wtc","w")
+            file.write("server=rdp:%s\n" % filecontent[5])
+            file.write("User=CT:123456aB\n")
+            file.write("graphic=abcdefg\n")
+            file.close()
 
-        # Load the file into a QMovie
-        self.movie = QMovie(filename, QByteArray(), self)
-
-        size = self.movie.scaledSize()
-        self.setGeometry(200, 200, size.width(), size.height())
-        self.setWindowTitle(title)
-
-        self.movie_screen = QLabel()
-        # Make label fit the gif
-        self.movie_screen.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.movie_screen.setAlignment(Qt.AlignCenter)
-
-        # Create the layout
-        main_layout = QVBoxLayout()
-        main_layout.addWidget(self.movie_screen)
-
-        self.setLayout(main_layout)
-
-        # Add the QMovie object to the label
-        self.movie.setCacheMode(QMovie.CacheAll)
-        self.movie.setSpeed(100)
-        self.movie_screen.setMovie(self.movie)
-        self.movie.start()
-
+            # Write SD comes from here
+            # PoP up the write content window
+            self.dialog.show()
 
 ###################### main functionality ############################
 if __name__ == "__main__":
@@ -314,7 +282,7 @@ if __name__ == "__main__":
     app = QtGui.QApplication(sys.argv)
     app.setApplicationName('MyWindow')
 
-    main = MyWindow("/home/dash/name2.csv")
+    main = MyWindow("/home/dash/client.csv")
     main.show()
 
     sys.exit(app.exec_())
