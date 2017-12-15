@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
+import sip
+sip.setapi(u'QString', 2)
+sip.setapi(u'QVariant', 2)
 import csv
 from multiprocessing import Process
 import sys
@@ -10,9 +13,6 @@ sys.setdefaultencoding('utf8')
 import time
 # copy files to someplace
 from shutil import copyfile
-import sip
-sip.setapi('QString', 2)
-sip.setapi('QVariant', 2)
 from PyQt4 import QtGui, QtCore
 from PyQt4.QtCore import *
 from PyQt4.QtGui import *
@@ -24,6 +24,45 @@ from glob import glob
 from subprocess import check_output, CalledProcessError
 import os
 from distutils.dir_util import copy_tree
+# Detect the platform
+from sys import platform
+
+
+####################### Only in windows, for detecting sd card #########
+if platform == "win32":
+    import ctypes
+
+    # Drive types
+    DRIVE_UNKNOWN     = 0  # The drive type cannot be determined.
+    DRIVE_NO_ROOT_DIR = 1  # The root path is invalid; for example, there is no volume mounted at the specified path.
+    DRIVE_REMOVABLE   = 2  # The drive has removable media; for example, a floppy drive, thumb drive, or flash card reader.
+    DRIVE_FIXED       = 3  # The drive has fixed media; for example, a hard disk drive or flash drive.
+    DRIVE_REMOTE      = 4  # The drive is a remote (network) drive.
+    DRIVE_CDROM       = 5  # The drive is a CD-ROM drive.
+    DRIVE_RAMDISK     = 6  # The drive is a RAM disk.
+
+    # Map drive types to strings
+    DRIVE_TYPE_MAP = { DRIVE_UNKNOWN     : 'DRIVE_UNKNOWN',
+                       DRIVE_NO_ROOT_DIR : 'DRIVE_NO_ROOT_DIR',
+                       DRIVE_REMOVABLE   : 'DRIVE_REMOVABLE',
+                       DRIVE_FIXED       : 'DRIVE_FIXED',
+                       DRIVE_REMOTE      : 'DRIVE_REMOTE',
+                       DRIVE_CDROM       : 'DRIVE_CDROM',
+                       DRIVE_RAMDISK     : 'DRIVE_RAMDISK'}
+
+
+    # Return list of tuples mapping drive letters to drive types
+    def get_drive_info():
+        result = []
+        bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+        for i in range(26):
+            bit = 2 ** i
+            if bit & bitmask:
+                drive_letter = '%s:' % chr(65 + i)
+                drive_type = ctypes.windll.kernel32.GetDriveTypeA('%s\\' % drive_letter)
+                result.append((drive_letter, drive_type))
+        return result
+# end if platform == "win32":
 
 ####################### Play Movie(gif) ################################
 class QTextMovieLabel(QLabel):
@@ -117,12 +156,20 @@ class WriteSDWindow(QtGui.QDialog):
         self.listWidget = QListWidget()
 
         # Fill in the items into the self.listWidget
-        for i in get_mount_points():
-            self.listWidget.addItem(i[1])
+        if platform == "linux":
+            for i in get_mount_points():
+                self.listWidget.addItem(i[1])
+        elif platform == "win32":
+            drive_info = get_drive_info()
+            removable_drives = [drive_letter for drive_letter, drive_type in drive_info if
+                                drive_type == DRIVE_REMOVABLE]
+            for i in removable_drives:
+                self.listWidget.addItem(i)
+            print 'removable_drives = %r' % removable_drives
 
         self.verticalLayout = QtGui.QVBoxLayout(self)
         # Animation for waiting
-        self.l = QTextMovieLabel('OnGoing?', '/home/dash/Downloads/cheers.gif')
+        self.l = QTextMovieLabel('OnGoing?', './cheers.gif')
         self.verticalLayout.addWidget(self.l)
         self.l.show()
         self.verticalLayout.addWidget(self.listWidget)
@@ -142,21 +189,22 @@ class WriteSDWindow(QtGui.QDialog):
             QMessageBox.about(self, "Select One Disk", "Select Your Disk!!!")
         else:
             # Display the image, then automatically exit
-            # Copy the generated files into the SD Card
+            # Copy the generated files into t2017_12_06_17_30_01_319x95.jpghe SD Card
             # Destination directory
             dest = item.text() #+'/localboot1'
-            # show successful movie
-            copy_tree("./localboot",dest)
-            copyfile('./config/config.wtc',dest+'/configs/config.wtc')
-            copyfile('./config/initrd.wtc',dest+'/configs/initrd.wtc')
+            copy_tree("./localboot",str(dest))
+            copyfile('./config/config.wtc',str(dest)+'/configs/config.wtc')
+            copyfile('./config/initrd.wtc',str(dest)+'/configs/initrd.wtc')
             # After copy, sync to disk
             if hasattr(os, 'sync'):
                 sync = os.sync
             else:
-                import ctypes
-                libc = ctypes.CDLL("libc.so.6")
-                def sync():
-                    libc.sync()
+                pass
+                # todo: windows version's sync
+                #import ctypes
+                #libc = ctypes.CDLL("libc.so.6")
+                #def sync():
+                #    libc.sync()
             QMessageBox.about(self, "Write Finish", "Your Disk have been wrote!!!")
             self.close()
 
@@ -172,11 +220,6 @@ class MyWindow(QtGui.QWidget):
         self.tableView.setModel(self.model)
         self.tableView.horizontalHeader().setStretchLastSection(True)
         self.tableView.setSelectionBehavior(QAbstractItemView.SelectRows)
-
-        # load csv file button
-        #self.pushButtonLoad = QtGui.QPushButton(self)
-        #self.pushButtonLoad.setText("Load Csv File!")
-        #self.pushButtonLoad.clicked.connect(self.on_pushButtonLoad_clicked)
 
         self.pushButtonWriteSD = QtGui.QPushButton(self)
         self.pushButtonWriteSD.setText("Write SD Card!")
@@ -248,7 +291,6 @@ class MyWindow(QtGui.QWidget):
         ### todo: multiple lines could be selected, while we only want to use the first line.
         # Data Processing Routing goes from here.
         ### todo: judget the content
-        print len(filecontent)
         if len(filecontent) == 0:
             QMessageBox.about(self, "At Least One Item", "At Least One Item!!!")
         else:
@@ -282,7 +324,8 @@ if __name__ == "__main__":
     app = QtGui.QApplication(sys.argv)
     app.setApplicationName('MyWindow')
 
-    main = MyWindow("/home/dash/client.csv")
+    main = MyWindow("./client.csv")
+    main.resize(800,600)
     main.show()
 
     sys.exit(app.exec_())
